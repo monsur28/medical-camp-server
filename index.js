@@ -28,9 +28,9 @@ async function run() {
     // Send a ping to confirm a successful connection
     const availableCampCollection = client.db("MedCamp").collection("camp");
     const joinCampCollection = client.db("MedCamp").collection("joinCamp");
+    const usersCollection = client.db("MedCamp").collection("user");
 
     const verifyToken = (req, res, next) => {
-      console.log("inside verify token", req.headers.authorization);
       if (!req.headers.authorization) {
         return res.status(401).send({ message: "unauthorized access" });
       }
@@ -64,11 +64,30 @@ async function run() {
       res.send(result);
     });
 
+    app.get("/joinCamp/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const query = { email: email };
+        const result = await joinCampCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
+
+    app.delete("/joinCamp/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await joinCampCollection.deleteOne(query);
+      res.send(result);
+    });
+
     app.post("/joinCamp", async (req, res) => {
-      const { campName, participantEmail } = req.body;
+      const { campName, email } = req.body;
       const existingEntry = await joinCampCollection.findOne({
         campName,
-        participantEmail,
+        email,
       });
 
       if (existingEntry) {
@@ -81,6 +100,34 @@ async function run() {
       const newEntry = req.body;
       const result = await joinCampCollection.insertOne(newEntry);
       res.status(201).send({ insertedId: result.insertedId });
+    });
+
+    app.post("/users", async (req, res) => {
+      const user = req.body;
+      const query = { email: user.email };
+      const isExist = await usersCollection.findOne(query);
+      if (isExist) {
+        return res.send({ message: "user already exists", insertedId: null });
+      }
+      const result = await usersCollection.insertOne(user);
+      res.send(result);
+    });
+
+    app.get("/users/role/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      const query = { email: email };
+      const result = await usersCollection.findOne(query);
+
+      res.send(result);
+    });
+    app.get("/users/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const result = await usersCollection.findOne(query);
+      res.send(result);
     });
 
     await client.db("admin").command({ ping: 1 });

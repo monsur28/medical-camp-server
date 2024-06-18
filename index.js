@@ -4,6 +4,7 @@ const cors = require("cors");
 require("dotenv").config();
 const jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const port = process.env.PORT || 5000;
 
 // middleware
@@ -29,6 +30,7 @@ async function run() {
     const availableCampCollection = client.db("MedCamp").collection("camp");
     const joinCampCollection = client.db("MedCamp").collection("joinCamp");
     const usersCollection = client.db("MedCamp").collection("user");
+    const paymentCollection = client.db("MedCamp").collection("payments");
 
     app.post("/jwt", async (req, res) => {
       const user = req.body;
@@ -78,9 +80,55 @@ async function run() {
       res.send(result);
     });
 
+    app.delete("/CampData/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const result = await joinCampCollection.deleteOne(query);
+      res.send(result);
+    });
+
     app.post("/camps", verifyToken, verifyAdmin, async (req, res) => {
       const item = req.body;
       const result = await availableCampCollection.insertOne(item);
+      res.send(result);
+    });
+
+    app.delete("/joinCamp/:id", verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await joinCampCollection.deleteOne(query);
+        if (result.deletedCount > 0) {
+          res.send({ success: true, deletedCount: result.deletedCount });
+        } else {
+          res.status(404).send({ success: false, message: "Camp not found" });
+        }
+      } catch (error) {
+        console.error("Error deleting camp:", error);
+        res
+          .status(500)
+          .send({ success: false, message: "Internal Server Error" });
+      }
+    });
+
+    app.patch("/camps/:id", async (req, res) => {
+      const item = req.body;
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const updatedDoc = {
+        $set: {
+          name: item.campName,
+          fees: item.fees,
+          location: item.location,
+          dateTime: item.dateTime,
+          healthcareProfessional: item.healthcareProfessional,
+        },
+      };
+
+      const result = await availableCampCollection.updateOne(
+        filter,
+        updatedDoc
+      );
       res.send(result);
     });
 
@@ -96,12 +144,12 @@ async function run() {
       }
     });
 
-    app.delete("/joinCamp/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await joinCampCollection.deleteOne(query);
+    app.get("/joinCamp", async (req, res) => {
+      const result = await joinCampCollection.find().toArray();
       res.send(result);
     });
+
+    // Backend route to delete entries based on user email
 
     app.post("/joinCamp", async (req, res) => {
       const { campName, email } = req.body;
@@ -178,6 +226,49 @@ async function run() {
         res.send(result);
       }
     );
+
+    // payment intent
+    app.post("/create-payment-intent", async (req, res) => {
+      const { price } = req.body;
+      const amount = parseInt(price * 100);
+      console.log(amount, "amount inside the intent");
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: "usd",
+        payment_method_types: ["card"],
+      });
+
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
+    });
+
+    app.get("/payments/:email", verifyToken, async (req, res) => {
+      const query = { email: req.params.email };
+      if (req.params.email !== req.decoded.email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      const result = await paymentCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    app.post("/payments", async (req, res) => {
+      const payment = req.body;
+      const paymentResult = await paymentCollection.insertOne(payment);
+
+      //  carefully delete each item from the cart
+      console.log("payment info", payment);
+      const query = {
+        _id: {
+          $in: payment.campIds.map((id) => new ObjectId(id)),
+        },
+      };
+
+      const deleteResult = await joinCampCollection.deleteMany(query);
+
+      res.send({ paymentResult, deleteResult });
+    });
 
     await client.db("admin").command({ ping: 1 });
     console.log(

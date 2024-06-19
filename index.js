@@ -31,6 +31,7 @@ async function run() {
     const joinCampCollection = client.db("MedCamp").collection("joinCamp");
     const usersCollection = client.db("MedCamp").collection("user");
     const paymentCollection = client.db("MedCamp").collection("payments");
+    const feedbacksCollection = client.db("MedCamp").collection("feedbacks");
 
     app.post("/jwt", async (req, res) => {
       const user = req.body;
@@ -42,7 +43,6 @@ async function run() {
 
     // middlewares
     const verifyToken = (req, res, next) => {
-      // console.log('inside verify token', req.headers.authorization);
       if (!req.headers.authorization) {
         return res.status(401).send({ message: "unauthorized access" });
       }
@@ -170,6 +170,20 @@ async function run() {
       res.status(201).send({ insertedId: result.insertedId });
     });
 
+    app.get("/campParticipantsCount", async (req, res) => {
+      const pipeline = [
+        {
+          $group: {
+            _id: "$campName",
+            count: { $sum: 1 },
+          },
+        },
+      ];
+
+      const result = await joinCampCollection.aggregate(pipeline).toArray();
+      res.send(result);
+    });
+
     // users
 
     app.post("/users", async (req, res) => {
@@ -184,6 +198,11 @@ async function run() {
     });
 
     app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+      const result = await usersCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.get("/userProfile", async (req, res) => {
       const result = await usersCollection.find().toArray();
       res.send(result);
     });
@@ -227,6 +246,29 @@ async function run() {
       }
     );
 
+    app.patch("/updateProfile", async (req, res) => {
+      const { name, email } = req.body;
+      const emailMatch = req.query.email;
+
+      const updatedFields = {
+        name: name,
+        email: email,
+      };
+
+      const updateOperation = {
+        $set: updatedFields,
+      };
+      console.log("Updating profile for email:", emailMatch);
+      console.log("New data:", updatedFields);
+
+      const result = await usersCollection.updateOne(
+        { email: emailMatch },
+        updateOperation
+      );
+
+      res.send({ message: "Profile updated successfully", result });
+    });
+
     // payment intent
     app.post("/create-payment-intent", async (req, res) => {
       const { price } = req.body;
@@ -246,28 +288,44 @@ async function run() {
 
     app.get("/payments/:email", verifyToken, async (req, res) => {
       const query = { email: req.params.email };
-      if (req.params.email !== req.decoded.email) {
-        return res.status(403).send({ message: "forbidden access" });
-      }
+
       const result = await paymentCollection.find(query).toArray();
       res.send(result);
     });
 
-    app.post("/payments", async (req, res) => {
-      const payment = req.body;
-      const paymentResult = await paymentCollection.insertOne(payment);
+    app.get("/payments/", verifyToken, verifyAdmin, async (req, res) => {
+      const query = req.body;
+      const result = await paymentCollection.find(query).toArray();
+      res.send(result);
+    });
 
-      //  carefully delete each item from the cart
-      console.log("payment info", payment);
-      const query = {
-        _id: {
-          $in: payment.campIds.map((id) => new ObjectId(id)),
+    app.patch("/payments/:id", verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+
+      const updatedDoc = {
+        $set: {
+          status: "Confirmed",
         },
       };
 
-      const deleteResult = await joinCampCollection.deleteMany(query);
+      const result = await paymentCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
 
-      res.send({ paymentResult, deleteResult });
+    app.post("/payments", verifyToken, async (req, res) => {
+      const payment = req.body;
+      const paymentResult = await paymentCollection.insertOne(payment);
+
+      res.send({ paymentResult });
+    });
+
+    // feedback
+
+    app.post("/feedback", async (req, res) => {
+      const query = req.body;
+      const feedbackData = await feedbacksCollection.insertOne(query);
+      res.send({ feedbackData });
     });
 
     await client.db("admin").command({ ping: 1 });

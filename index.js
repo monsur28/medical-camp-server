@@ -325,7 +325,19 @@ async function run() {
     app.post("/feedback", async (req, res) => {
       const query = req.body;
       const feedbackData = await feedbacksCollection.insertOne(query);
-      res.send({ feedbackData });
+      res.send(feedbackData);
+    });
+
+    app.get("/feedback", async (req, res) => {
+      const result = await feedbacksCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.get("/feedback/:email/:id", async (req, res) => {
+      const { email, id } = req.params;
+      const query = { email, campId };
+      const result = await feedbacksCollection.find(query).toArray();
+      res.send(result);
     });
 
     await client.db("admin").command({ ping: 1 });

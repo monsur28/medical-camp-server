@@ -25,7 +25,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
     // Send a ping to confirm a successful connection
     const availableCampCollection = client.db("MedCamp").collection("camp");
     const joinCampCollection = client.db("MedCamp").collection("joinCamp");
@@ -80,9 +80,9 @@ async function run() {
       res.send(result);
     });
 
-    app.delete("/CampData/:email", async (req, res) => {
-      const email = req.params.email;
-      const query = { email: email };
+    app.delete("/CampData/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
       const result = await joinCampCollection.deleteOne(query);
       res.send(result);
     });
@@ -323,9 +323,25 @@ async function run() {
     // feedback
 
     app.post("/feedback", async (req, res) => {
-      const query = req.body;
-      const feedbackData = await feedbacksCollection.insertOne(query);
-      res.send(feedbackData);
+      const { campId, email } = req.body;
+      const existingFeedback = await feedbacksCollection.findOne({
+        campId,
+        email,
+      });
+
+      if (existingFeedback) {
+        return res
+          .status(400)
+          .send({ message: "Feedback already submitted for this camp." });
+      }
+
+      try {
+        const feedbackData = await feedbacksCollection.insertOne(req.body);
+        res.status(201).send(feedbackData); // Send status 201 for successful creation
+      } catch (error) {
+        console.error("Error submitting feedback:", error);
+        res.status(500).send({ message: "Failed to submit feedback." });
+      }
     });
 
     app.get("/feedback", async (req, res) => {
@@ -340,7 +356,7 @@ async function run() {
       res.send(result);
     });
 
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
